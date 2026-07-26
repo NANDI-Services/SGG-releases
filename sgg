@@ -1,0 +1,140 @@
+#!/usr/bin/env bash
+# ============================================================================
+# sgg — CLI wrapper para operaciones diarias de una instancia SGG.
+#
+# Instalado por install.sh en /usr/local/bin/sgg. Todos los comandos actúan
+# sobre la stack en /opt/sgg (o $SGG_HOME si está seteada).
+#
+# Subcomandos:
+#   sgg update                     — pull nuevas imágenes + up (respetando tag pinneado en .env)
+#   sgg logs [servicio]            — tail -f (default: todos)
+#   sgg doctor                     — health HTTP + df + pgbackrest info
+#   sgg backup-now                 — incremental manual (rápido)
+#   sgg backup-full                — full backup manual
+#   sgg restore-pitr <timestamp>   — restaura a punto-en-el-tiempo (destructivo)
+#   sgg status                     — docker compose ps
+#   sgg version                    — SGG_VERSION actual del .env
+# ============================================================================
+
+set -euo pipefail
+
+SGG_HOME="${SGG_HOME:-/opt/sgg}"
+
+cd "$SGG_HOME" 2>/dev/null || {
+  echo "sgg: no puedo entrar a $SGG_HOME. ¿Está instalado? (setea SGG_HOME si vive en otro path)" >&2
+  exit 1
+}
+
+CMD="${1:-help}"
+shift || true
+
+case "$CMD" in
+  update)
+    echo "==> Pulling imágenes (tag pinneado en .env)…"
+    docker compose pull
+    echo "==> Recreando servicios…"
+    docker compose up -d --wait
+    echo "==> Actualizado. Versión: $(grep '^SGG_VERSION=' .env | cut -d= -f2- | tr -d '\"')"
+    ;;
+
+  logs)
+    docker compose logs -f --tail=200 "$@"
+    ;;
+
+  doctor)
+    echo "==> Docker compose ps"
+    docker compose ps
+    echo ""
+    echo "==> Espacio en disco"
+    df -h /var/lib/docker /opt/sgg 2>/dev/null | head -20 || df -h
+    echo ""
+    echo "==> Health HTTP"
+    for svc in "web:3000:/" "api:3001:/health"; do
+      name="${svc%%:*}"
+      rest="${svc#*:}"
+      port="${rest%%:*}"
+      path="${rest#*:}"
+      code=$(curl -sS -o /dev/null -w "%{http_code}" "http://localhost:${port}${path}" || echo "000")
+      echo "  $name (http://localhost:${port}${path}) → HTTP $code"
+    done
+    echo ""
+    echo "==> pgBackRest info"
+    docker compose exec -T db su -s /bin/sh postgres -c "pgbackrest --stanza=sgg info" \
+      || echo "  (no se pudo obtener info — stanza no creada aún o db down)"
+    ;;
+
+  backup-now)
+    echo "==> Backup incremental…"
+    docker compose exec -T db \
+      su -s /bin/sh postgres -c "pgbackrest --stanza=sgg --type=incr backup"
+    ;;
+
+  backup-full)
+    echo "==> Backup full (lento, corre semanal por cron)…"
+    docker compose exec -T db \
+      su -s /bin/sh postgres -c "pgbackrest --stanza=sgg --type=full backup"
+    ;;
+
+  restore-pitr)
+    TARGET="${1:-}"
+    if [[ -z "$TARGET" ]]; then
+      echo "Uso: sgg restore-pitr \"YYYY-MM-DD HH:MM:SS\"" >&2
+      echo "     sgg restore-pitr \"YYYY-MM-DD HH:MM:SS\" --force" >&2
+      exit 1
+    fi
+    FORCE_FLAG=""
+    if [[ "${2:-}" == "--force" ]]; then FORCE_FLAG="yes"; fi
+
+    if ! date -d "$TARGET" >/dev/null 2>&1; then
+      echo "sgg: timestamp inválido: $TARGET (esperado YYYY-MM-DD HH:MM:SS)" >&2
+      exit 1
+    fi
+
+    if [[ -z "$FORCE_FLAG" ]]; then
+      echo ""
+      echo "⚠️  DESTRUCTIVO: se sobrescribe el estado actual y se restaura a $TARGET."
+      echo "   Los datos posteriores a ese timestamp se PIERDEN."
+      read -r -p "Escribí 'yes' para continuar: " CONFIRM
+      [[ "$CONFIRM" == "yes" ]] || { echo "Cancelado."; exit 1; }
+    fi
+
+    echo "==> Parando api/web/migrations…"
+    docker compose stop api web migrations || true
+    echo "==> Parando db…"
+    docker compose stop db
+    echo "==> Restore pgBackRest --type=time --target=\"$TARGET\" --delta…"
+    docker compose run --rm --no-deps -e PG_ENTRYPOINT_SKIP_POSTGRES=1 db \
+      su -s /bin/sh postgres -c "pgbackrest --stanza=sgg --type=time --target='$TARGET' --delta restore"
+    echo "==> Arrancando db (recovery aplica WAL)…"
+    docker compose up -d db
+    echo "==> Esperando db healthy…"
+    for _ in $(seq 1 30); do
+      if docker compose ps --format json db 2>/dev/null | grep -q '"Health":"healthy"'; then
+        echo "  db healthy."
+        break
+      fi
+      sleep 2
+    done
+    echo "==> Arrancando api + web…"
+    docker compose up -d api web
+    echo "==> Restore completado."
+    ;;
+
+  status)
+    docker compose ps
+    ;;
+
+  version)
+    grep '^SGG_VERSION=' .env | cut -d= -f2- | tr -d '"'
+    ;;
+
+  help|--help|-h|"")
+    sed -n '3,20p' "$0" | sed 's/^# \?//'
+    ;;
+
+  *)
+    echo "sgg: subcomando desconocido: $CMD" >&2
+    echo "Ver: sgg help" >&2
+    exit 1
+    ;;
+esac

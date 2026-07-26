@@ -1,0 +1,110 @@
+# ============================================================================
+# SGG — docker-compose.yaml (PRODUCCIÓN, residencias)
+#
+# Imágenes pinneadas por SGG_VERSION desde GHCR privado (NANDI-Services).
+# Requiere `docker login ghcr.io` previo con PAT classic scope read:packages
+# (install.sh lo hace por vos). Bootstrap: `bash install.sh`.
+#
+# Servicios:
+#   db          — postgres:16-alpine + pgBackRest + dcron (imagen custom).
+#   migrations  — job one-shot: prisma migrate deploy. Corre y sale.
+#   api         — Fastify. Puerto 3001.
+#   web         — Next.js standalone. Puerto 3000.
+#
+# Uso diario:
+#   sgg update        — pull nuevas imágenes + reinicio con downtime ~15s
+#   sgg logs [svc]    — tail
+#   sgg doctor        — health + disco + pgbackrest info
+#   sgg backup-now    — full backup manual
+# ============================================================================
+
+services:
+  db:
+    image: ghcr.io/nandi-services/sgg-db:${SGG_VERSION:?SGG_VERSION obligatorio}
+    container_name: sgg-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-sgg}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD obligatorio}
+      POSTGRES_DB: ${POSTGRES_DB:-sgg}
+      PGBACKREST_REPO_CIPHER_PASS: ${PGBACKREST_REPO_CIPHER_PASS:?PGBACKREST_REPO_CIPHER_PASS obligatorio (perderla = perder backups)}
+    # Puerto NO expuesto al host en producción. Acceso via `docker compose exec`.
+    command: ["postgres", "-c", "config_file=/etc/postgresql/postgresql.conf"]
+    volumes:
+      - sgg_pgdata:/var/lib/postgresql/data
+      - sgg_pgbackrest:/var/lib/pgbackrest
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-sgg} -d ${POSTGRES_DB:-sgg}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  migrations:
+    image: ghcr.io/nandi-services/sgg-api:${SGG_VERSION:?SGG_VERSION obligatorio}
+    container_name: sgg-migrations
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-sgg}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-sgg}?schema=public
+    working_dir: /repo/apps/api
+    command:
+      ["node", "--import", "tsx/esm", "node_modules/prisma/build/index.js", "migrate", "deploy"]
+    restart: "no"
+
+  api:
+    image: ghcr.io/nandi-services/sgg-api:${SGG_VERSION:?SGG_VERSION obligatorio}
+    container_name: sgg-api
+    depends_on:
+      db:
+        condition: service_healthy
+      migrations:
+        condition: service_completed_successfully
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-sgg}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-sgg}?schema=public
+      API_HOST: 0.0.0.0
+      API_PORT: 3001
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3000}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET obligatorio}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-30m}
+      REFRESH_TOKEN_SECRET: ${REFRESH_TOKEN_SECRET:?REFRESH_TOKEN_SECRET obligatorio}
+      REFRESH_TOKEN_EXPIRES_IN_DAYS: ${REFRESH_TOKEN_EXPIRES_IN_DAYS:-30}
+      SEED_ADMIN_EMAIL: ${SEED_ADMIN_EMAIL:-admin@sgg.local}
+      SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:?SEED_ADMIN_PASSWORD obligatorio en producción}
+      SEED_ADMIN_NAME: ${SEED_ADMIN_NAME:-Administrador SGG}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      METRICS_ENABLED: ${METRICS_ENABLED:-true}
+    ports:
+      - "3001:3001"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3001/health >/dev/null 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  web:
+    image: ghcr.io/nandi-services/sgg-web:${SGG_VERSION:?SGG_VERSION obligatorio}
+    container_name: sgg-web
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      HOSTNAME: 0.0.0.0
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/ >/dev/null 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+volumes:
+  sgg_pgdata:
+  sgg_pgbackrest:
