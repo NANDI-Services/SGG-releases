@@ -118,7 +118,9 @@ step "4/9 Generando secrets (openssl)"
 if [[ -f .env ]]; then
   log ".env ya existe. NO se sobrescribe. Si querés reinstalar, borralo primero."
 else
-  POSTGRES_PASSWORD_VAL=$(openssl rand -base64 32)
+  # hex (no base64): el password entra en la connection URL de Prisma; base64
+  # trae `+/=` que rompen el parser (visto: P1013 invalid port number).
+  POSTGRES_PASSWORD_VAL=$(openssl rand -hex 32)
   JWT_SECRET_VAL=$(openssl rand -hex 64)
   REFRESH_TOKEN_SECRET_VAL=$(openssl rand -hex 64)
   PGBACKREST_REPO_CIPHER_PASS_VAL=$(openssl rand -base64 32)
