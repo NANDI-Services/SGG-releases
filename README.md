@@ -111,10 +111,11 @@ sirven. Guardá copia del `.env` (o al menos esa variable) fuera de la máquina.
 - **`sgg doctor` dice `db down`**: `sgg logs db` para ver el motivo.
   Común: disco lleno (`df -h`), `PGBACKREST_REPO_CIPHER_PASS` cambiada
   vs. lo que espera el repo pgBackRest existente.
-- **Web carga pero no llega al API**: `sgg doctor` muestra el HTTP; si
-  el 3001 responde 200 pero el 3000 no llega, revisá `CORS_ORIGIN` en `.env`.
-- **Cambiar el hostname público**: editar `NEXT_PUBLIC_API_URL` y
-  `CORS_ORIGIN` en `.env` + `sgg update` (rebuild del bundle web).
+- **Web carga pero no llega al API**: el web hace fetch same-origin a `/api/*`
+  y Next lo proxea al container `api`. Si `sgg doctor` da los dos servicios
+  healthy pero el login sigue fallando, `sgg logs web` va a mostrar el error
+  de proxy. Cambiar de hostname no requiere rebuild — la imagen web es
+  cliente-agnóstica.
 
 ## Desinstalar
 

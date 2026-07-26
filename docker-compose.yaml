@@ -104,6 +104,9 @@ services:
       NODE_ENV: production
       PORT: 3000
       HOSTNAME: 0.0.0.0
+      # Rewrite target del proxy `/api/*` (ver next.config.ts). Runtime env:
+      # el bundle es cliente-agnóstico, sirve cualquier IP/dominio sin rebuild.
+      INTERNAL_API_URL: http://api:3001
     ports:
       - "3000:3000"
     restart: unless-stopped
