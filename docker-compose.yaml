@@ -56,9 +56,22 @@ services:
         condition: service_healthy
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-sgg}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-sgg}?schema=public
+      SEED_ADMIN_EMAIL: ${SEED_ADMIN_EMAIL:-admin@sgg.local}
+      SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:?SEED_ADMIN_PASSWORD obligatorio en producción}
+      SEED_ADMIN_NAME: ${SEED_ADMIN_NAME:-Administrador SGG}
     working_dir: /repo/apps/api
+    # Migrate + seed en el mismo job. Sin seed no hay user admin → login 500
+    # en instalaciones fresh. Seed corre directo con `node --import tsx/esm`
+    # porque `prisma db seed` invoca `tsx prisma/seed.ts` (hook de
+    # package.json#prisma.seed) y `tsx` no está en el PATH del container
+    # (Dockerfile no lo instala como binario global). Idempotente: seed.ts
+    # hace upsert por email del admin.
     command:
-      ["node", "--import", "tsx/esm", "node_modules/prisma/build/index.js", "migrate", "deploy"]
+      [
+        "sh",
+        "-c",
+        "node --import tsx/esm node_modules/prisma/build/index.js migrate deploy && node --import tsx/esm prisma/seed.ts",
+      ]
     restart: "no"
 
   api:

@@ -21,7 +21,7 @@
 set -euo pipefail
 
 # --- Config bumpeada por publish-release.yml ---
-SGG_VERSION="0.1.0-test"
+SGG_VERSION="0.1.0-test2"
 SGG_HOME="${SGG_HOME:-/opt/sgg}"
 SGG_DRY_RUN="${SGG_DRY_RUN:-0}"
 
