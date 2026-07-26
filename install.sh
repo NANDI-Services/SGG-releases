@@ -30,22 +30,28 @@ GHCR_ORG="nandi-services"
 
 LOG_FILE="${SGG_HOME}/install.log"
 
+# Root check ANTES de crear el directorio (log() lo requiere).
+if [[ $EUID -ne 0 ]]; then
+  echo "ERROR: Correr como root (sudo bash install.sh)." >&2
+  exit 1
+fi
+
+# Log file debe existir antes del primer log() (tee -a falla si no).
+mkdir -p "$SGG_HOME"
+touch "$LOG_FILE"
+
 log()  { echo "[$(date +'%F %T')] $*" | tee -a "$LOG_FILE" >&2; }
 die()  { log "ERROR: $*"; exit 1; }
 step() { echo ""; log "==> $*"; }
 
 # --- 0. Precondiciones de OS ---
 step "0/9 Verificando OS"
-[[ $EUID -eq 0 ]] || die "Correr como root (sudo bash install.sh)."
 [[ -f /etc/os-release ]] || die "No es un sistema Linux estándar (falta /etc/os-release)."
 . /etc/os-release
 case "${ID:-}${ID_LIKE:-}" in
   *ubuntu*|*debian*) log "OS: $PRETTY_NAME";;
   *) die "OS no soportado: $PRETTY_NAME. Requiere Ubuntu 22.04+ o Debian 12+.";;
 esac
-
-mkdir -p "$SGG_HOME"
-touch "$LOG_FILE"
 
 # --- 1. Docker + openssl + curl ---
 step "1/9 Instalando dependencias (docker, openssl, curl)"
