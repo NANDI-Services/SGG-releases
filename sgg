@@ -6,7 +6,7 @@
 # sobre la stack en /opt/sgg (o $SGG_HOME si está seteada).
 #
 # Subcomandos:
-#   sgg update                     — pull nuevas imágenes + up (respetando tag pinneado en .env)
+#   sgg update [version]           — bumpea SGG_VERSION en .env (si arg) + pull + up
 #   sgg logs [servicio]            — tail -f (default: todos)
 #   sgg doctor                     — health HTTP + df + pgbackrest info
 #   sgg backup-now                 — incremental manual (rápido)
@@ -30,7 +30,14 @@ shift || true
 
 case "$CMD" in
   update)
-    echo "==> Pulling imágenes (tag pinneado en .env)…"
+    NEW_VERSION="${1:-}"
+    if [[ -n "$NEW_VERSION" ]]; then
+      # Bump persistente del .env: sin esto `docker compose up` sigue leyendo
+      # el tag viejo y ni el pull ni el force-recreate cambian la imagen.
+      echo "==> Bumpeando SGG_VERSION a $NEW_VERSION en .env…"
+      sed -i "s/^SGG_VERSION=.*/SGG_VERSION=\"$NEW_VERSION\"/" .env
+    fi
+    echo "==> Pulling imágenes (tag actual en .env)…"
     docker compose pull
     echo "==> Recreando servicios…"
     docker compose up -d --wait
@@ -103,9 +110,12 @@ case "$CMD" in
     echo "==> Parando db…"
     docker compose stop db
     echo "==> Restore pgBackRest --type=time --target=\"$TARGET\" --delta…"
+    # --target-action=promote: sin esto Postgres queda en modo standby/read-only
+    # después del replay y cualquier INSERT falla con "cannot execute INSERT in
+    # a read-only transaction". Con promote, sale del recovery y acepta writes.
     docker compose run --rm --no-deps -e PG_ENTRYPOINT_SKIP_POSTGRES=1 db \
-      su -s /bin/sh postgres -c "pgbackrest --stanza=sgg --type=time --target='$TARGET' --delta restore"
-    echo "==> Arrancando db (recovery aplica WAL)…"
+      su -s /bin/sh postgres -c "pgbackrest --stanza=sgg --type=time --target='$TARGET' --target-action=promote --delta restore"
+    echo "==> Arrancando db (recovery aplica WAL y promueve)…"
     docker compose up -d db
     echo "==> Esperando db healthy…"
     for _ in $(seq 1 30); do
