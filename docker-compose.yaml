@@ -38,7 +38,11 @@ services:
       # temporal en socket local responde ready antes de crear el user/db reales).
       # psql SELECT 1 sólo pasa cuando la DB real existe → guard fiable para
       # migrations service_healthy. Ver CLAUDE.md §Lessons Learned.
-      test: ["CMD-SHELL", "su -s /bin/sh postgres -c \"psql -h /var/run/postgresql -U '${POSTGRES_USER:-sgg}' -d '${POSTGRES_DB:-sgg}' -tAc 'SELECT 1'\" >/dev/null 2>&1"]
+      test:
+        [
+          "CMD-SHELL",
+          'su -s /bin/sh postgres -c "psql -h /var/run/postgresql -U ''${POSTGRES_USER:-sgg}'' -d ''${POSTGRES_DB:-sgg}'' -tAc ''SELECT 1''" >/dev/null 2>&1',
+        ]
       interval: 10s
       timeout: 5s
       retries: 12
