@@ -34,10 +34,15 @@ services:
       - sgg_pgdata:/var/lib/postgresql/data
       - sgg_pgbackrest:/var/lib/pgbackrest
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-sgg} -d ${POSTGRES_DB:-sgg}"]
+      # pg_isready da false-positive durante initdb en postgres:16-alpine (postgres
+      # temporal en socket local responde ready antes de crear el user/db reales).
+      # psql SELECT 1 sólo pasa cuando la DB real existe → guard fiable para
+      # migrations service_healthy. Ver CLAUDE.md §Lessons Learned.
+      test: ["CMD-SHELL", "su -s /bin/sh postgres -c \"psql -h /var/run/postgresql -U '${POSTGRES_USER:-sgg}' -d '${POSTGRES_DB:-sgg}' -tAc 'SELECT 1'\" >/dev/null 2>&1"]
       interval: 10s
       timeout: 5s
-      retries: 5
+      retries: 12
+      start_period: 60s
 
   migrations:
     image: ghcr.io/nandi-services/sgg-api:v${SGG_VERSION:?SGG_VERSION obligatorio}
