@@ -96,7 +96,14 @@ else
 fi
 
 if [[ "$SGG_DRY_RUN" != "1" ]]; then
-  echo "$PAT" | docker login ghcr.io -u "$GHCR_ORG" --password-stdin \
+  # GHCR usa el GitHub username del OWNER del PAT como identidad para el pull,
+  # no la org. Aunque el docker login acepte cualquier -u con un PAT válido,
+  # el pull va a fallar con 403 si el username no corresponde al owner del PAT.
+  GHCR_USER=$(curl -sSf -H "Authorization: token $PAT" https://api.github.com/user \
+              | sed -n 's/.*"login": *"\([^"]*\)".*/\1/p' | head -1)
+  [[ -n "$GHCR_USER" ]] || die "No pude leer el username del PAT desde api.github.com/user. ¿PAT inválido?"
+  log "PAT válido, dueño: $GHCR_USER"
+  echo "$PAT" | docker login ghcr.io -u "$GHCR_USER" --password-stdin \
     || die "docker login ghcr.io falló. Verificá el PAT y su scope."
 fi
 
