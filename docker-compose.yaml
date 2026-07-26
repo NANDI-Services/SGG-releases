@@ -97,6 +97,9 @@ services:
       SEED_ADMIN_NAME: ${SEED_ADMIN_NAME:-Administrador SGG}
       LOG_LEVEL: ${LOG_LEVEL:-info}
       METRICS_ENABLED: ${METRICS_ENABLED:-true}
+      # Cookies con flag Secure. Default false para pilot en LAN sin HTTPS.
+      # Setear true cuando haya reverse-proxy TLS (Caddy, nginx, Cloudflare).
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
     ports:
       - "3001:3001"
     restart: unless-stopped
