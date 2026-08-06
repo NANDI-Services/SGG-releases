@@ -11,6 +11,7 @@
 #   SGG_VERSION=0.1.2 bash -c "$(curl -fsSL ...)"     — pinnear otra versión
 #   SGG_HOME=/srv/sgg bash -c "$(curl -fsSL ...)"     — otro directorio
 #   SGG_DRY_RUN=1 bash install.sh                     — no toca nada
+#   SGG_ALLOW_LXC=1 bash install.sh                   — permitir CT/LXC (avanzado)
 #
 # El script pide UNA sola cosa interactiva: el PAT classic de GitHub con
 # scope read:packages (para bajar imágenes del registry privado de la org
@@ -21,9 +22,10 @@
 set -euo pipefail
 
 # --- Config bumpeada por publish-release.yml ---
-SGG_VERSION="0.1.0"
+SGG_VERSION="0.1.1"
 SGG_HOME="${SGG_HOME:-/opt/sgg}"
 SGG_DRY_RUN="${SGG_DRY_RUN:-0}"
+SGG_ALLOW_LXC="${SGG_ALLOW_LXC:-0}"
 
 RELEASES_RAW="https://raw.githubusercontent.com/NANDI-Services/SGG-releases/main"
 GHCR_ORG="nandi-services"
@@ -44,8 +46,8 @@ log()  { echo "[$(date +'%F %T')] $*" | tee -a "$LOG_FILE" >&2; }
 die()  { log "ERROR: $*"; exit 1; }
 step() { echo ""; log "==> $*"; }
 
-# --- 0. Precondiciones de OS ---
-step "0/9 Verificando OS"
+# --- 0. Precondiciones de OS y entorno ---
+step "0/9 Verificando OS y entorno"
 [[ -f /etc/os-release ]] || die "No es un sistema Linux estándar (falta /etc/os-release)."
 . /etc/os-release
 case "${ID:-}${ID_LIKE:-}" in
@@ -53,8 +55,42 @@ case "${ID:-}${ID_LIKE:-}" in
   *) die "OS no soportado: $PRETTY_NAME. Requiere Ubuntu 22.04+ o Debian 12+.";;
 esac
 
+# Devuelve el tipo de container (lxc, docker, …) o string vacío si es bare
+# metal / VM. systemd-detect-virt es el camino canónico, pero no existe en
+# imágenes sin systemd — de ahí los dos fallbacks.
+detect_container() {
+  local v=""
+  if command -v systemd-detect-virt >/dev/null 2>&1; then
+    v="$(systemd-detect-virt --container 2>/dev/null || true)"
+    [[ "$v" == "none" ]] && v=""
+  fi
+  [[ -z "$v" ]] && grep -qa 'container=lxc' /proc/1/environ 2>/dev/null && v="lxc"
+  [[ -z "$v" && -f /run/systemd/container ]] && v="$(cat /run/systemd/container)"
+  # Docker sin systemd (ej. debian:12 pelado) no cae en ninguno de los de
+  # arriba, pero siempre deja este marcador en la raíz.
+  [[ -z "$v" && -f /.dockerenv ]] && v="docker"
+  printf '%s' "$v"
+}
+
+# Chequeo de POLICY: "¿es una configuración que soportamos?". Bypasseable a
+# propósito con SGG_ALLOW_LXC=1 — el probe funcional del paso 1 es el que
+# verifica si el entorno REALMENTE puede correr la stack, y ese no se bypassea.
+CONTAINER_TYPE="$(detect_container)"
+if [[ -n "$CONTAINER_TYPE" ]]; then
+  if [[ "$SGG_ALLOW_LXC" == "1" ]]; then
+    log "ADVERTENCIA: container detectado ($CONTAINER_TYPE). SGG_ALLOW_LXC=1 — sigo."
+  else
+    log "Container detectado: $CONTAINER_TYPE — esto no es una VM."
+    log "SGG se soporta sobre VM. Docker adentro de LXC no está soportado upstream:"
+    log "  la stack falla al montar el volumen de Postgres (operation not permitted)."
+    log "Si es un CT Proxmox privilegiado con nesting=1,keyctl=1, forzalo con:"
+    log "  SGG_ALLOW_LXC=1 bash install.sh"
+    die "Entorno no soportado. No se instaló Docker ni se pidió el PAT."
+  fi
+fi
+
 # --- 1. Docker + openssl + curl ---
-step "1/9 Instalando dependencias (docker, openssl, curl)"
+step "1/9 Instalando dependencias y verificando Docker"
 apt-get update -qq
 apt-get install -y -qq ca-certificates curl gnupg openssl
 
@@ -73,6 +109,34 @@ else
 fi
 
 docker compose version >/dev/null 2>&1 || die "docker compose plugin no disponible."
+
+# Chequeo de FÍSICA: "¿este kernel puede correr la stack?". Verifica el
+# mecanismo (levantar un container + montar un volumen), no la identidad del
+# entorno — que es justo lo que rompe en un CT sin nesting=1/keyctl=1, y
+# también caza VMs con el daemon roto o storage driver degradado.
+# NO es bypasseable: si esto falla, `docker compose up` tampoco va a andar.
+# Corre acá, antes del prompt del PAT y de generar secrets, para que un
+# entorno incapaz falle barato en vez de dejar media instalación.
+if [[ "$SGG_DRY_RUN" == "1" ]]; then
+  log "DRY_RUN: salteando probe de Docker."
+elif docker pull -q alpine:3 >/dev/null 2>&1; then
+  docker volume create sgg_probe >/dev/null
+  probe_rc=0
+  docker run --rm -v sgg_probe:/probe alpine:3 sh -c 'touch /probe/ok' >/dev/null 2>&1 || probe_rc=$?
+  # Limpiar ANTES del die: si no, el volumen queda huérfano en el host.
+  docker volume rm sgg_probe >/dev/null 2>&1 || true
+  if [[ $probe_rc -ne 0 ]]; then
+    log "Docker no puede correr un container con volumen montado en este host."
+    log "Es exactamente lo que rompe la stack de SGG (volumen de Postgres)."
+    log "En un CT Proxmox: falta --features nesting=1,keyctl=1 y/o el CT es unprivileged."
+    die "Docker no es funcional acá. No se pidió el PAT ni se generaron secrets."
+  fi
+  log "Probe OK: Docker puede correr containers y montar volúmenes."
+else
+  # Fallar el pull es red, no permisos. Perdemos la verificación pero no
+  # bloqueamos una instalación por un corte de Docker Hub.
+  log "ADVERTENCIA: no pude bajar alpine:3 para el probe (¿sin red?). Sigo sin verificar."
+fi
 
 # --- 2. Pedir PAT ---
 step "2/9 Autenticación GitHub Container Registry"

@@ -6,10 +6,18 @@ fuente no vive acá.
 
 ## Requisitos
 
-- Ubuntu 22.04+ o Debian 12+ (VM, CT Proxmox, cloud minimal).
+- Ubuntu 22.04+ o Debian 12+ sobre **VM** (Proxmox/KVM, Hyper-V, VMware) o cloud minimal.
 - 2 vCPU, 4 GB RAM, 40 GB disco.
 - Acceso `sudo` / `root`.
 - Un **PAT classic** de GitHub con scope `read:packages` (ver abajo).
+
+> **CT / LXC de Proxmox no es el camino soportado.** Docker adentro de LXC no está
+> soportado upstream y la stack falla al montar el volumen de Postgres
+> (`operation not permitted`). `install.sh` detecta el container y aborta antes de pedir el
+> PAT. Si es un CT **privilegiado** con `--features nesting=1,keyctl=1` y sabés lo que
+> hacés, forzalo con `SGG_ALLOW_LXC=1 bash install.sh` — pero el instalador igual corre un
+> probe funcional de Docker que **no** se puede saltear: si el kernel no puede montar
+> volúmenes, aborta igual. Ante la duda, usá una VM: no requiere ningún tweak.
 
 ## Instalación (one-liner)
 
@@ -57,31 +65,31 @@ Cuando termina la relación comercial con una residencia:
 
 ## Comandos diarios (`sgg`)
 
-| Comando                                  | Qué hace                                                 |
-| ---------------------------------------- | -------------------------------------------------------- |
-| `sgg update`                             | Baja imágenes nuevas + recrea servicios (~15s downtime). |
-| `sgg logs [servicio]`                    | Tail de logs. Sin arg → todos.                           |
-| `sgg doctor`                             | Health HTTP + disco + `pgbackrest info`.                 |
-| `sgg backup-now`                         | Backup **incremental** manual (rápido).                  |
-| `sgg backup-full`                        | Backup **full** manual (el cron ya lo hace semanal).     |
-| `sgg restore-pitr "YYYY-MM-DD HH:MM:SS"` | Restaura a punto-en-el-tiempo. **Destructivo**.          |
-| `sgg status`                             | `docker compose ps`.                                     |
-| `sgg version`                            | Versión pinneada en `.env`.                              |
+| Comando                                     | Qué hace                                                            |
+| ------------------------------------------- | ------------------------------------------------------------------- |
+| `sgg update [version]`                      | Bumpea `SGG_VERSION` en `.env` (si hay arg) + pull + up (~15s).     |
+| `sgg logs [servicio]`                       | Tail de logs. Sin arg → todos.                                      |
+| `sgg doctor`                                | Health HTTP + disco + `pgbackrest info`.                            |
+| `sgg backup-now`                            | Backup **incremental** manual (rápido).                             |
+| `sgg backup-full`                           | Backup **full** manual (el cron ya lo hace semanal).                |
+| `sgg restore-pitr "YYYY-MM-DD HH:MM:SS+TZ"` | Restaura a punto-en-el-tiempo. **Destructivo**. `--force` opcional. |
+| `sgg status`                                | `docker compose ps`.                                                |
+| `sgg version`                               | Versión pinneada en `.env`.                                         |
 
 ## Actualizar a una versión nueva
 
 ```bash
-sudo sed -i 's/^SGG_VERSION=.*/SGG_VERSION="0.1.2"/' /opt/sgg/.env
-sudo sgg update
+sudo sgg update 0.1.2
 ```
 
-O reinstalar apuntando a la versión: `SGG_VERSION=0.1.2 sudo bash -c "$(curl ...)"`
-(no borra `.env`, sólo actualiza compose + CLI + tag).
+Persiste `SGG_VERSION=0.1.2` en `/opt/sgg/.env`, baja las imágenes y recrea
+los servicios. Sin argumento, respeta el tag actual y solo re-pullea +
+recrea.
 
 ## Restaurar a un punto anterior
 
 ```bash
-sudo sgg restore-pitr "2026-07-25 14:30:00"
+sudo sgg restore-pitr "2026-07-25 14:30:00+00"
 # Confirmá con 'yes'. La operación:
 #   1. Para api/web/migrations
 #   2. Para db
@@ -106,6 +114,14 @@ sirven. Guardá copia del `.env` (o al menos esa variable) fuera de la máquina.
 
 ## Troubleshooting
 
+- **`install.sh` aborta con `Entorno no soportado`**: estás sobre un CT/LXC, no una VM.
+  Ver la nota en Requisitos. La instalación se corta antes de pedir el PAT y antes de
+  generar secrets, así que no queda estado a medias: creá una VM y volvé a correr el
+  one-liner.
+- **`install.sh` aborta con `Docker no es funcional acá`**: el probe levantó un container
+  con un volumen montado y falló. En un CT Proxmox significa que faltan
+  `--features nesting=1,keyctl=1` o que el CT es unprivileged. En una VM, apunta a un
+  daemon de Docker roto: `systemctl status docker` y `docker info`.
 - **`sgg update` falla con `denied` o `unauthorized`**: PAT venció o fue
   revocado. Regenerar y volver a `docker login ghcr.io`.
 - **`sgg doctor` dice `db down`**: `sgg logs db` para ver el motivo.
