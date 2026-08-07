@@ -38,7 +38,7 @@ merge_env() {
   done < "$example"
 }
 
-# Baja sgg/compose/.env.example del TAG objetivo, verifica checksums y se
+# Baja sgg/compose/env.example del TAG objetivo, verifica checksums y se
 # reemplaza a sí mismo. Termina en `exec` para que el resto del update corra
 # con el script nuevo: bash lee el script mientras lo ejecuta y reemplazarlo
 # in-place a mitad de corrida es comportamiento indefinido.
@@ -49,7 +49,9 @@ self_update() {
   local to="$1" tmp f
   [[ -n "${SGG_SELF_UPDATED:-}" ]] && return 0   # anti-loop tras el exec
   tmp=$(mktemp -d)
-  for f in sgg docker-compose.yaml .env.example SHA256SUMS; do
+  # `env.example` sin punto: GitHub renombra los assets dotfile del release
+  # (`.env.example` → `default.env.example`) y la descarga por nombre 404ea.
+  for f in sgg docker-compose.yaml env.example SHA256SUMS; do
     if ! curl -fsSL "${SGG_RELEASES_DL}/v${to}/${f}" -o "${tmp}/${f}"; then
       echo "sgg: v${to} no publica ${f} — sigo sin self-update." >&2
       rm -rf "$tmp"
@@ -62,7 +64,7 @@ self_update() {
     exit 1
   }
   echo "==> Self-update: instalando sgg + docker-compose.yaml de v${to}…"
-  merge_env "${tmp}/.env.example" "${SGG_HOME}/.env"
+  merge_env "${tmp}/env.example" "${SGG_HOME}/.env"
   install -m 644 "${tmp}/docker-compose.yaml" "${SGG_HOME}/docker-compose.yaml"
   install -m 755 "${tmp}/sgg" /usr/local/bin/sgg
   rm -rf "$tmp"
