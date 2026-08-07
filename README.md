@@ -28,6 +28,22 @@ sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/NANDI-Services/SGG-
 El script pide el PAT una vez, genera todos los secrets, levanta la stack
 e imprime las credenciales del admin **una sola vez** al final. Guardalas.
 
+## Acceso a la app
+
+Terminada la instalación, SGG escucha en la IP del servidor dentro de la LAN:
+
+| Qué              | URL                                    |
+| ---------------- | -------------------------------------- |
+| Web              | `http://<IP-DEL-SERVIDOR>:3000`        |
+| Health de la API | `http://<IP-DEL-SERVIDOR>:3001/health` |
+
+El paso `7/9 Puertos` del instalador imprime esa IP ya resuelta. Si perdiste el output de
+la consola, quedó en el log: `grep 'Web:' /opt/sgg/install.log`. Para averiguarla a mano,
+`hostname -I` en el servidor.
+
+Ubuntu y Debian vienen con UFW inactivo por default, así que normalmente no hace falta
+abrir nada. Si lo activaste: `sudo ufw allow 3000/tcp && sudo ufw allow 3001/tcp`.
+
 ## Cómo generar el PAT (5 min)
 
 El PAT lo genera **NANDI Services** (no el operador de la residencia). El

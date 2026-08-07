@@ -22,7 +22,7 @@
 set -euo pipefail
 
 # --- Config bumpeada por publish-release.yml ---
-SGG_VERSION="0.1.1"
+SGG_VERSION="0.1.2"
 SGG_HOME="${SGG_HOME:-/opt/sgg}"
 SGG_DRY_RUN="${SGG_DRY_RUN:-0}"
 SGG_ALLOW_LXC="${SGG_ALLOW_LXC:-0}"
@@ -92,7 +92,10 @@ fi
 # --- 1. Docker + openssl + curl ---
 step "1/9 Instalando dependencias y verificando Docker"
 apt-get update -qq
-apt-get install -y -qq ca-certificates curl gnupg openssl
+# iproute2 es no-op en cualquier VM real (priority important, viene en todas
+# las cloud images), pero el paso 7/9 depende de `ip` para resolver la IP de
+# LAN: declararlo evita que degrade en silencio a un placeholder.
+apt-get install -y -qq ca-certificates curl gnupg openssl iproute2
 
 if ! command -v docker >/dev/null 2>&1; then
   log "Docker no encontrado. Instalando desde repo oficial…"
@@ -218,9 +221,45 @@ curl -fsSL "${RELEASES_RAW}/sgg" -o /usr/local/bin/sgg
 chmod +x /usr/local/bin/sgg
 
 # --- 7. Firewall hint (no toca) ---
+
+# Devuelve la IP con la que se llega al server desde la LAN, o string vacío.
+#
+# `hostname -I` NO sirve acá: lista TODAS las IPs no-loopback y para este
+# punto el paso 5 ya levantó la stack, así que docker0 (172.17.0.1) y el
+# bridge del proyecto (172.18.0.1) ya existen. Tomar "la primera" acierta o
+# no según el orden de los índices de interfaz, que no es contrato.
+#
+# El `|| true` no es decorativo: con `set -euo pipefail` una asignación cuyo
+# comando falla aborta el script, y pipefail hace fallar el pipe entero si
+# `ip` no existe (127) o no hay ruta por default. Sin el guard, una VM sin
+# default route moriría acá — después de que la stack ya levantó.
+detect_server_ip() {
+  local ip=""
+  # `ip route get` no manda paquetes: consulta la tabla de ruteo. Buscamos el
+  # campo `src` recorriendo, no por posición: el formato varía según haya
+  # `via`, `uid`, `table`, etc.
+  ip="$(ip route get 1.1.1.1 2>/dev/null \
+        | awk '{for (i = 1; i < NF; i++) if ($i == "src") { print $(i+1); exit }}' || true)"
+  # Sin ruta por default (red aislada): primera IP global que no sea de una
+  # interfaz de Docker. Filtra por NOMBRE de interfaz, no por rango: 172.16/12
+  # es RFC1918 legítimo y puede ser perfectamente la LAN del cliente.
+  if [[ -z "$ip" ]]; then
+    ip="$(ip -o -4 addr show scope global 2>/dev/null \
+          | awk '$2 !~ /^(docker|br-|veth)/ { split($4, a, "/"); print a[1]; exit }' || true)"
+  fi
+  printf '%s' "$ip"
+}
+
 step "7/9 Puertos"
-log "Web:  http://\$(hostname -I | awk '{print \$1}'):3000"
-log "API:  http://\$(hostname -I | awk '{print \$1}'):3001/health"
+SERVER_IP="$(detect_server_ip)"
+if [[ -n "$SERVER_IP" ]]; then
+  log "Web:  http://${SERVER_IP}:3000"
+  log "API:  http://${SERVER_IP}:3001/health"
+else
+  log "No pude determinar la IP del servidor. Corré 'hostname -I' y entrá a:"
+  log "Web:  http://<IP>:3000"
+  log "API:  http://<IP>:3001/health"
+fi
 log "Si usás UFW: sudo ufw allow 3000/tcp && sudo ufw allow 3001/tcp"
 
 # --- 8. Info de credenciales admin (única vez) ---
