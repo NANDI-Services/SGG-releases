@@ -51,7 +51,7 @@ self_update() {
   tmp=$(mktemp -d)
   # `env.example` sin punto: GitHub renombra los assets dotfile del release
   # (`.env.example` → `default.env.example`) y la descarga por nombre 404ea.
-  for f in sgg docker-compose.yaml env.example SHA256SUMS; do
+  for f in sgg sgg-agent docker-compose.yaml env.example SHA256SUMS; do
     if ! curl -fsSL "${SGG_RELEASES_DL}/v${to}/${f}" -o "${tmp}/${f}"; then
       echo "sgg: v${to} no publica ${f} — sigo sin self-update." >&2
       rm -rf "$tmp"
@@ -67,6 +67,8 @@ self_update() {
   merge_env "${tmp}/env.example" "${SGG_HOME}/.env"
   install -m 644 "${tmp}/docker-compose.yaml" "${SGG_HOME}/docker-compose.yaml"
   install -m 755 "${tmp}/sgg" /usr/local/bin/sgg
+  # El agente también: un bug en sgg-agent no puede exigir SSH para arreglarse.
+  install -m 755 "${tmp}/sgg-agent" /usr/local/bin/sgg-agent
   rm -rf "$tmp"
   SGG_SELF_UPDATED=1 exec /usr/local/bin/sgg update "$to"
 }

@@ -131,8 +131,10 @@ fi
 # --- 5. timestamp del SERVER (§8.2) + backup incremental --------------------
 # El reloj del host puede driftear; el --target del PITR debe salir del mismo
 # reloj que escribió el WAL.
+# -U/-d explícitos: en postgres:16-alpine el superusuario es $POSTGRES_USER
+# (sgg), el rol "postgres" NO existe. Mismo patrón que pg-entrypoint-wrapper.
 T=$(docker compose exec -T db su -s /bin/sh postgres \
-  -c 'psql -tAc "SELECT to_char(now(), '\''YYYY-MM-DD HH24:MI:SS'\'')"' \
+  -c 'psql -h /var/run/postgresql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "SELECT to_char(now(), '\''YYYY-MM-DD HH24:MI:SS'\'')"' \
   | tr -d '\r' | sed 's/^ *//;s/ *$//')
 if [[ ! "$T" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}\ [0-9]{2}:[0-9]{2}:[0-9]{2}$ ]]; then
   journal update_failed "backup: timestamp del server ilegible: ${T}"
