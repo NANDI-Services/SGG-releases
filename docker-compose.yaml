@@ -97,6 +97,14 @@ services:
       SEED_ADMIN_NAME: ${SEED_ADMIN_NAME:-Administrador SGG}
       LOG_LEVEL: ${LOG_LEVEL:-info}
       METRICS_ENABLED: ${METRICS_ENABLED:-true}
+      # Auto-update (docs/plans/autoupdate-plan.md §14). Todas con default y
+      # ninguna obligatoria: una instalación sin migrar a auto-update levanta
+      # igual. SGG_AGENT_TOKEN vacío = endpoints internos del agente inertes.
+      SGG_UPDATE_CHANNEL: ${SGG_UPDATE_CHANNEL:-patch}
+      SGG_UPDATE_WINDOW: ${SGG_UPDATE_WINDOW:-03:00-05:00}
+      SGG_UPDATE_DEADLINE_HOURS: ${SGG_UPDATE_DEADLINE_HOURS:-72}
+      SGG_AGENT_TOKEN: ${SGG_AGENT_TOKEN:-}
+      SGG_INSTANCE_NAME: ${SGG_INSTANCE_NAME:-}
       # Cookies con flag Secure. Default false para pilot en LAN sin HTTPS.
       # Setear true cuando haya reverse-proxy TLS (Caddy, nginx, Cloudflare).
       COOKIE_SECURE: ${COOKIE_SECURE:-false}

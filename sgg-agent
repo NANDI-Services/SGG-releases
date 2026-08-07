@@ -1,0 +1,216 @@
+#!/usr/bin/env bash
+# ============================================================================
+# sgg-agent — ejecutor del auto-update de SGG.
+#
+# NO decide nada: la política vive en la API, que es el lado actualizable
+# (docs/plans/autoupdate-plan.md §4). Este script pregunta, ejecuta y reporta.
+# Corre cada 15 min vía systemd timer (sgg-agent.timer). Logs: journalctl -u
+# sgg-agent. Verdad de último recurso: /opt/sgg/state/journal.ndjson —
+# append-only, vive en el host, fuera del alcance del PITR (§10.1).
+#
+# Flujo (§8): lock → decisión → journal → pull (sin tocar .env) → timestamp
+# del server + backup incr → bump .env → up --wait → health profundo →
+# report; si falla: rollback con PITR (§10) y report DESPUÉS del restore.
+# ============================================================================
+set -uo pipefail
+
+SGG_HOME="${SGG_HOME:-/opt/sgg}"
+# Overrideables sólo para el harness de integración (§17.4 T3.6).
+API="${SGG_AGENT_API_URL:-http://localhost:3001}"
+WEB="${SGG_AGENT_WEB_URL:-http://localhost:3000}"
+HEALTH_TIMEOUT="${SGG_AGENT_HEALTH_TIMEOUT:-180}"
+CURL_MAX="${SGG_AGENT_CURL_TIMEOUT:-30}"
+
+STATE_DIR="${SGG_HOME}/state"
+JOURNAL="${STATE_DIR}/journal.ndjson"
+LAST_DECISION="${STATE_DIR}/last-apply-decision"
+
+mkdir -p "$STATE_DIR"
+cd "$SGG_HOME" || exit 1
+
+# Sin token no hay auto-update: instalación sin migrar. Salir en silencio.
+TOKEN=$(grep '^SGG_AGENT_TOKEN=' .env 2>/dev/null | cut -d= -f2- | tr -d '"') || true
+[[ -n "${TOKEN:-}" ]] && [[ "$TOKEN" != '""' ]] || exit 0
+
+journal() { # $1=kind $2=detail
+  printf '{"at":"%s","kind":"%s","detail":"%s"}\n' \
+    "$(date -Is)" "$1" "${2:-}" >> "$JOURNAL"
+}
+
+api_get() { curl -fsS -m "$CURL_MAX" -H "X-SGG-Agent-Token: ${TOKEN}" "${API}$1"; }
+api_post() {
+  curl -fsS -m "$CURL_MAX" -H "X-SGG-Agent-Token: ${TOKEN}" \
+    -H "Content-Type: application/json" --data-binary "$2" "${API}$1"
+}
+
+report() { # $1=json — nunca aborta el flujo (§15): el journal ya tiene todo.
+  api_post /internal/update/report "$1" >/dev/null || journal agent_error "report fallo"
+}
+
+# Webhook opcional (§15): best-effort, jamás puede hacer fallar un update ni
+# un rollback. El payload lleva SOLO metadata de la instalación — nunca datos
+# de residentes ni de usuarios (Ley 25.326).
+notify() { # $1=event $2=json extra ("clave":"valor",... o vacío)
+  local url name
+  url=$(grep '^SGG_ALERT_WEBHOOK=' .env 2>/dev/null | cut -d= -f2- | tr -d '"') || true
+  [[ -n "${url:-}" ]] || return 0
+  name=$(grep '^SGG_INSTANCE_NAME=' .env 2>/dev/null | cut -d= -f2- | tr -d '"') || true
+  [[ -n "${name:-}" ]] || name=$(hostname)
+  curl -fsS -m 5 -H "Content-Type: application/json" --data-binary \
+    "{\"instance\":\"${name}\",\"event\":\"$1\",\"at\":\"$(date -Is)\"${2:+,$2}}" \
+    "$url" >/dev/null 2>&1 || journal agent_error "webhook fallo"
+}
+
+# Extrae un campo string de un JSON plano de la propia API. Sin jq a
+# propósito: es una dependencia menos en el host (§3/R2).
+json_str() { # $1=campo $2=json
+  sed -n "s/.*\"$1\":\"\([^\"]*\)\".*/\1/p" <<<"$2"
+}
+
+# --- 1. lock: no solaparse consigo mismo (§4.2) -----------------------------
+exec 9>"${STATE_DIR}/agent.lock"
+flock -n 9 || exit 0
+
+# --- 2. decisión ------------------------------------------------------------
+if ! DECISION=$(api_get /internal/update/decision); then
+  journal agent_error "API sin respuesta en /internal/update/decision"
+  # Webhook con rate-limit de 6 h: una API caída se detecta en cada ciclo de
+  # 15 min y sin el guard serían ~96 POSTs por día.
+  NOTIFY_MARK="${STATE_DIR}/last-agent-error-notify"
+  if [[ ! -f "$NOTIFY_MARK" ]] ||
+    (($(date +%s) - $(stat -c %Y "$NOTIFY_MARK" 2>/dev/null || echo 0) > 21600)); then
+    notify agent_error "\"detail\":\"API sin respuesta en /internal/update/decision\""
+    touch "$NOTIFY_MARK"
+  fi
+  # §8.3: política conservadora — una API caída ya es un sistema roto y un
+  # update encima destruye la evidencia. Excepción única: hay una decisión
+  # `apply` cacheada (deadline/ventana ya la sancionaron) con más de 24 h,
+  # o sea "la API está caída PORQUE la versión actual está rota y el fix
+  # está publicado".
+  if [[ -f "$LAST_DECISION" ]]; then
+    cached_at=$(head -1 "$LAST_DECISION")
+    now_s=$(date +%s)
+    if [[ "$cached_at" =~ ^[0-9]+$ ]] && (( now_s - cached_at > 86400 )); then
+      DECISION=$(tail -1 "$LAST_DECISION")
+      journal deadline_override "aplicando decisión cacheada de hace >24h con API caída"
+    else
+      exit 0
+    fi
+  else
+    exit 0
+  fi
+fi
+
+ACTION=$(json_str action "$DECISION")
+if [[ "$ACTION" != "apply" ]]; then
+  rm -f "$LAST_DECISION"
+  exit 0
+fi
+
+FROM=$(json_str from "$DECISION")
+TO=$(json_str to "$DECISION")
+if [[ -z "$TO" || -z "$FROM" ]]; then
+  journal agent_error "decision malformada: ${DECISION}"
+  exit 0
+fi
+printf '%s\n%s\n' "$(date +%s)" "$DECISION" > "$LAST_DECISION"
+
+# --- 3. journal ANTES de tocar nada (§8) ------------------------------------
+journal attempt "update ${FROM} -> ${TO}"
+
+# --- 4. pull con la versión como VARIABLE DE SHELL (§8.1) -------------------
+# `pull` respeta el env de shell pero `up` relee del .env: verifica que las
+# imágenes existen en GHCR SIN comprometerse al tag nuevo. Si el release
+# salió sin imágenes, aborta habiendo tocado exactamente nada.
+if ! SGG_VERSION="$TO" docker compose pull; then
+  journal update_failed "pull: imágenes de v${TO} no disponibles"
+  report "{\"outcome\":\"failed\",\"from\":\"${FROM}\",\"to\":\"${TO}\",\"failedStep\":\"pull\"}"
+  exit 0
+fi
+
+# --- 5. timestamp del SERVER (§8.2) + backup incremental --------------------
+# El reloj del host puede driftear; el --target del PITR debe salir del mismo
+# reloj que escribió el WAL.
+T=$(docker compose exec -T db su -s /bin/sh postgres \
+  -c 'psql -tAc "SELECT to_char(now(), '\''YYYY-MM-DD HH24:MI:SS'\'')"' \
+  | tr -d '\r' | sed 's/^ *//;s/ *$//')
+if [[ ! "$T" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}\ [0-9]{2}:[0-9]{2}:[0-9]{2}$ ]]; then
+  journal update_failed "backup: timestamp del server ilegible: ${T}"
+  report "{\"outcome\":\"failed\",\"from\":\"${FROM}\",\"to\":\"${TO}\",\"failedStep\":\"backup\"}"
+  exit 0
+fi
+if ! docker compose exec -T db su -s /bin/sh postgres \
+  -c "pgbackrest --stanza=sgg --type=incr backup"; then
+  journal update_failed "backup: pgbackrest incr fallo"
+  report "{\"outcome\":\"failed\",\"from\":\"${FROM}\",\"to\":\"${TO}\",\"failedStep\":\"backup\"}"
+  exit 0
+fi
+
+# --- 6. recién acá se persiste el tag nuevo ---------------------------------
+sed -i "s/^SGG_VERSION=.*/SGG_VERSION=\"${TO}\"/" .env
+
+# --- 8. health profundo (§9) ------------------------------------------------
+deep_health_ok() {
+  curl -fsS -m 15 "${API}/health/deep" >/dev/null 2>&1 &&
+    curl -fsS -m 15 -o /dev/null "${WEB}/" 2>/dev/null
+}
+
+wait_healthy() { # $1=segundos
+  local deadline=$(($(date +%s) + $1))
+  while (($(date +%s) < deadline)); do
+    deep_health_ok && return 0
+    sleep 10
+  done
+  return 1
+}
+
+# --- 10. rollback: PITR al instante previo + report DESPUÉS (§10) -----------
+rollback() { # $1=failedStep
+  local step="$1" pitr="false"
+  journal rollback_start "volviendo a ${FROM} (fallo en ${step})"
+  sed -i "s/^SGG_VERSION=.*/SGG_VERSION=\"${FROM}\"/" .env
+  docker compose stop api web migrations || true
+  docker compose stop db || true
+  # --target-action=promote: sin esto Postgres queda standby/read-only y
+  # hasta el login falla (refreshToken.create es un INSERT). Ver
+  # docs/ops/restore-pitr.md.
+  if docker compose run --rm --no-deps -e PG_ENTRYPOINT_SKIP_POSTGRES=1 db \
+    su -s /bin/sh postgres \
+    -c "pgbackrest --stanza=sgg --type=time --target='${T}' --target-action=promote --delta restore"; then
+    pitr="true"
+  else
+    journal rollback_failed "pgbackrest restore fallo — intervención manual (sgg restore-pitr)"
+  fi
+  docker compose up -d db || true
+  for _ in $(seq 1 30); do
+    docker compose ps --format json db 2>/dev/null | grep -q '"Health":"healthy"' && break
+    sleep 2
+  done
+  docker compose up -d --wait || true
+  if wait_healthy 120; then
+    journal rolled_back "sistema restaurado en ${FROM} (pitr=${pitr})"
+  else
+    journal rollback_failed "health sigue rojo tras rollback — intervención manual urgente"
+  fi
+  # El report va DESPUÉS del restore: si fuera antes, el PITR lo borraría
+  # junto con todo lo demás (§10.1).
+  report "{\"outcome\":\"failed\",\"from\":\"${FROM}\",\"to\":\"${TO}\",\"failedStep\":\"${step}\",\"pitrApplied\":${pitr}}"
+  notify update_rollback "\"from\":\"${FROM}\",\"to\":\"${TO}\",\"failedStep\":\"${step}\",\"pitrApplied\":${pitr}"
+}
+
+# --- 7. up con el tag nuevo -------------------------------------------------
+if ! timeout 300 docker compose up -d --wait; then
+  rollback "up"
+  exit 0
+fi
+
+if ! wait_healthy "$HEALTH_TIMEOUT"; then
+  rollback "health"
+  exit 0
+fi
+
+# --- 9. éxito ---------------------------------------------------------------
+journal applied "update ${FROM} -> ${TO} OK"
+rm -f "$LAST_DECISION"
+report "{\"outcome\":\"success\",\"from\":\"${FROM}\",\"to\":\"${TO}\"}"
+exit 0

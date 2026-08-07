@@ -81,16 +81,16 @@ Cuando termina la relación comercial con una residencia:
 
 ## Comandos diarios (`sgg`)
 
-| Comando                                     | Qué hace                                                            |
-| ------------------------------------------- | ------------------------------------------------------------------- |
-| `sgg update [version]`                      | Bumpea `SGG_VERSION` en `.env` (si hay arg) + pull + up (~15s).     |
-| `sgg logs [servicio]`                       | Tail de logs. Sin arg → todos.                                      |
-| `sgg doctor`                                | Health HTTP + disco + `pgbackrest info`.                            |
-| `sgg backup-now`                            | Backup **incremental** manual (rápido).                             |
-| `sgg backup-full`                           | Backup **full** manual (el cron ya lo hace semanal).                |
-| `sgg restore-pitr "YYYY-MM-DD HH:MM:SS+TZ"` | Restaura a punto-en-el-tiempo. **Destructivo**. `--force` opcional. |
-| `sgg status`                                | `docker compose ps`.                                                |
-| `sgg version`                               | Versión pinneada en `.env`.                                         |
+| Comando                                     | Qué hace                                                                                                                |
+| ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `sgg update [--force] [version]`            | Self-update de `sgg`/compose + bump `SGG_VERSION` + pull + up. `--force` limpia el veto de una versión que falló antes. |
+| `sgg logs [servicio]`                       | Tail de logs. Sin arg → todos.                                                                                          |
+| `sgg doctor`                                | Health HTTP + profundo (`/health/deep`) + disco + `pgbackrest info` + último rollback.                                  |
+| `sgg backup-now`                            | Backup **incremental** manual (rápido).                                                                                 |
+| `sgg backup-full`                           | Backup **full** manual (el cron ya lo hace semanal).                                                                    |
+| `sgg restore-pitr "YYYY-MM-DD HH:MM:SS+TZ"` | Restaura a punto-en-el-tiempo. **Destructivo**. `--force` opcional.                                                     |
+| `sgg status`                                | `docker compose ps`.                                                                                                    |
+| `sgg version`                               | Versión pinneada en `.env`.                                                                                             |
 
 ## Actualizar a una versión nueva
 
@@ -100,7 +100,37 @@ sudo sgg update 0.1.2
 
 Persiste `SGG_VERSION=0.1.2` en `/opt/sgg/.env`, baja las imágenes y recrea
 los servicios. Sin argumento, respeta el tag actual y solo re-pullea +
-recrea.
+recrea. Con versión, primero se **auto-actualiza**: baja `sgg`,
+`docker-compose.yaml` y `.env.example` del release objetivo, verifica
+`SHA256SUMS` y mergea variables nuevas al `.env` sin pisar valores.
+
+## Actualización automática (desatendida)
+
+Desde v0.2.0 las instancias se actualizan solas: un agente (`sgg-agent`,
+systemd timer cada 15 min) consulta a la API, aplica los updates en la
+ventana de mantenimiento (`SGG_UPDATE_WINDOW`, default `03:00-05:00`), hace
+backup incremental antes, y si el health check falla revierte con PITR al
+instante previo. Detalle completo: `docs/plans/autoupdate-plan.md` (repo
+privado).
+
+- **Canal** (`SGG_UPDATE_CHANNEL`): `patch` (default) | `minor` | `off`.
+  `off` desactiva el auto-update; el aviso en la web queda informativo.
+- **Logs del agente**: `journalctl -u sgg-agent`. Historial local:
+  `/opt/sgg/state/journal.ndjson`.
+- **Una versión que falló queda vetada** y no se reintenta sola;
+  `sudo sgg update --force <version>` la des-veta y aplica a mano.
+
+### Migrar una instalación existente (una sola vez)
+
+Instalaciones anteriores a v0.2.0 no tienen el agente ni el self-update.
+Una única sesión SSH lo resuelve:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/NANDI-Services/SGG-releases/main/migrate-to-autoupdate.sh | sudo bash
+sudo sgg update <version>
+```
+
+Es la última vez que hace falta SSH para actualizar.
 
 ## Restaurar a un punto anterior
 

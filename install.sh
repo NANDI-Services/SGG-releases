@@ -22,7 +22,7 @@
 set -euo pipefail
 
 # --- Config bumpeada por publish-release.yml ---
-SGG_VERSION="0.1.2"
+SGG_VERSION="0.2.0"
 SGG_HOME="${SGG_HOME:-/opt/sgg}"
 SGG_DRY_RUN="${SGG_DRY_RUN:-0}"
 SGG_ALLOW_LXC="${SGG_ALLOW_LXC:-0}"
@@ -192,6 +192,8 @@ else
   REFRESH_TOKEN_SECRET_VAL=$(openssl rand -hex 64)
   PGBACKREST_REPO_CIPHER_PASS_VAL=$(openssl rand -base64 32)
   SEED_ADMIN_PASSWORD_VAL=$(openssl rand -base64 24)
+  # hex: viaja por shell y headers HTTP (X-SGG-Agent-Token).
+  SGG_AGENT_TOKEN_VAL=$(openssl rand -hex 32)
 
   cp .env.example .env
   # Substituciones (sed con delimitador | porque los base64 traen /)
@@ -201,6 +203,7 @@ else
   sed -i "s|^REFRESH_TOKEN_SECRET=.*|REFRESH_TOKEN_SECRET=\"${REFRESH_TOKEN_SECRET_VAL}\"|"               .env
   sed -i "s|^PGBACKREST_REPO_CIPHER_PASS=.*|PGBACKREST_REPO_CIPHER_PASS=\"${PGBACKREST_REPO_CIPHER_PASS_VAL}\"|" .env
   sed -i "s|^SEED_ADMIN_PASSWORD=.*|SEED_ADMIN_PASSWORD=\"${SEED_ADMIN_PASSWORD_VAL}\"|"                  .env
+  sed -i "s|^SGG_AGENT_TOKEN=.*|SGG_AGENT_TOKEN=\"${SGG_AGENT_TOKEN_VAL}\"|"                              .env
 
   chmod 600 .env
   log ".env generado con permisos 600."
@@ -215,10 +218,22 @@ else
   docker compose up -d --wait
 fi
 
-# --- 6. Instalar CLI ---
-step "6/9 Instalando /usr/local/bin/sgg"
+# --- 6. Instalar CLI + agente de auto-update ---
+step "6/9 Instalando /usr/local/bin/sgg y sgg-agent"
 curl -fsSL "${RELEASES_RAW}/sgg" -o /usr/local/bin/sgg
 chmod +x /usr/local/bin/sgg
+# Agente de auto-update (docs/plans/autoupdate-plan.md): systemd timer cada
+# 15 min. El agente sale en silencio si SGG_AGENT_TOKEN no está en el .env.
+curl -fsSL "${RELEASES_RAW}/sgg-agent" -o /usr/local/bin/sgg-agent
+chmod +x /usr/local/bin/sgg-agent
+curl -fsSL "${RELEASES_RAW}/sgg-agent.service" -o /etc/systemd/system/sgg-agent.service
+curl -fsSL "${RELEASES_RAW}/sgg-agent.timer"   -o /etc/systemd/system/sgg-agent.timer
+if [[ "$SGG_DRY_RUN" == "1" ]]; then
+  log "DRY_RUN: saltando systemctl enable sgg-agent.timer."
+else
+  systemctl daemon-reload
+  systemctl enable --now sgg-agent.timer
+fi
 
 # --- 7. Firewall hint (no toca) ---
 

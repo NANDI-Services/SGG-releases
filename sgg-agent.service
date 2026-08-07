@@ -1,0 +1,9 @@
+[Unit]
+Description=SGG auto-update agent
+Documentation=https://github.com/NANDI-Services/SGG-releases
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/sgg-agent

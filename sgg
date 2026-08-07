@@ -6,7 +6,8 @@
 # sobre la stack en /opt/sgg (o $SGG_HOME si está seteada).
 #
 # Subcomandos:
-#   sgg update [version]           — bumpea SGG_VERSION en .env (si arg) + pull + up
+#   sgg update [--force] [version] — self-update + bump SGG_VERSION + pull + up
+#                                    --force limpia el veto de esa versión (§11)
 #   sgg logs [servicio]            — tail -f (default: todos)
 #   sgg doctor                     — health HTTP + df + pgbackrest info
 #   sgg backup-now                 — incremental manual (rápido)
@@ -19,10 +20,53 @@
 set -euo pipefail
 
 SGG_HOME="${SGG_HOME:-/opt/sgg}"
+# Overrideable sólo para el harness E2E (docs/plans/autoupdate-plan.md §17.7).
+SGG_RELEASES_DL="${SGG_RELEASES_DL:-https://github.com/NANDI-Services/SGG-releases/releases/download}"
 
 cd "$SGG_HOME" 2>/dev/null || {
   echo "sgg: no puedo entrar a $SGG_HOME. ¿Está instalado? (setea SGG_HOME si vive en otro path)" >&2
   exit 1
+}
+
+# Agrega al .env las claves del .env.example que falten. Nunca pisa valores.
+merge_env() {
+  local example="$1" envfile="$2" key
+  while IFS= read -r line; do
+    [[ "$line" =~ ^([A-Z_][A-Z0-9_]*)= ]] || continue
+    key="${BASH_REMATCH[1]}"
+    grep -q "^${key}=" "$envfile" || printf '%s\n' "$line" >> "$envfile"
+  done < "$example"
+}
+
+# Baja sgg/compose/.env.example del TAG objetivo, verifica checksums y se
+# reemplaza a sí mismo. Termina en `exec` para que el resto del update corra
+# con el script nuevo: bash lee el script mientras lo ejecuta y reemplazarlo
+# in-place a mitad de corrida es comportamiento indefinido.
+# Asset faltante DEGRADA (releases pre-Fase-0 no publican SHA256SUMS y
+# `sgg update` debe seguir funcionando contra ellos). Checksum inválido
+# ABORTA (posible corrupción o manipulación — nunca "sigo igual").
+self_update() {
+  local to="$1" tmp f
+  [[ -n "${SGG_SELF_UPDATED:-}" ]] && return 0   # anti-loop tras el exec
+  tmp=$(mktemp -d)
+  for f in sgg docker-compose.yaml .env.example SHA256SUMS; do
+    if ! curl -fsSL "${SGG_RELEASES_DL}/v${to}/${f}" -o "${tmp}/${f}"; then
+      echo "sgg: v${to} no publica ${f} — sigo sin self-update." >&2
+      rm -rf "$tmp"
+      return 0
+    fi
+  done
+  (cd "$tmp" && sha256sum -c --ignore-missing --quiet SHA256SUMS) || {
+    echo "sgg: checksum inválido en los assets de v${to} — aborto." >&2
+    rm -rf "$tmp"
+    exit 1
+  }
+  echo "==> Self-update: instalando sgg + docker-compose.yaml de v${to}…"
+  merge_env "${tmp}/.env.example" "${SGG_HOME}/.env"
+  install -m 644 "${tmp}/docker-compose.yaml" "${SGG_HOME}/docker-compose.yaml"
+  install -m 755 "${tmp}/sgg" /usr/local/bin/sgg
+  rm -rf "$tmp"
+  SGG_SELF_UPDATED=1 exec /usr/local/bin/sgg update "$to"
 }
 
 CMD="${1:-help}"
@@ -30,8 +74,33 @@ shift || true
 
 case "$CMD" in
   update)
+    FORCE=0
+    if [[ "${1:-}" == "--force" ]]; then
+      FORCE=1
+      shift
+    fi
     NEW_VERSION="${1:-}"
     if [[ -n "$NEW_VERSION" ]]; then
+      if [[ "$FORCE" == "1" ]]; then
+        # Una versión vetada por un rollback previo no se reofrece sola (§11).
+        # --force la des-veta por el endpoint interno; si la API está caída,
+        # avisa y sigue — el update manual no puede depender de la API.
+        AGENT_TOKEN=$(grep '^SGG_AGENT_TOKEN=' .env 2>/dev/null | cut -d= -f2- | tr -d '"') || true
+        if [[ -n "${AGENT_TOKEN:-}" ]]; then
+          if curl -fsS -m 10 -H "X-SGG-Agent-Token: ${AGENT_TOKEN}" \
+            -H "Content-Type: application/json" \
+            --data-binary "{\"version\":\"${NEW_VERSION}\"}" \
+            http://localhost:3001/internal/update/clear-veto >/dev/null 2>&1; then
+            echo "==> Veto de ${NEW_VERSION} limpiado."
+          else
+            echo "==> No se pudo limpiar el veto (¿API caída o versión no vetada?). Sigo igual." >&2
+          fi
+        fi
+      fi
+      # Primero el self-update: script + compose + merge de .env del tag
+      # objetivo. Si el tag no publica los assets (release viejo), degrada
+      # y sigue con la versión actual del script.
+      self_update "$NEW_VERSION"
       # Bump persistente del .env: sin esto `docker compose up` sigue leyendo
       # el tag viejo y ni el pull ni el force-recreate cambian la imagen.
       echo "==> Bumpeando SGG_VERSION a $NEW_VERSION en .env…"
@@ -65,9 +134,17 @@ case "$CMD" in
       echo "  $name (http://localhost:${port}${path}) → HTTP $code"
     done
     echo ""
+    echo "==> Health profundo (db + schema + escritura)"
+    curl -fsS http://localhost:3001/health/deep && echo "" \
+      || echo "  (FALLO — ver: sgg logs api)"
+    echo ""
     echo "==> pgBackRest info"
     docker compose exec -T db su -s /bin/sh postgres -c "pgbackrest --stanza=sgg info" \
       || echo "  (no se pudo obtener info — stanza no creada aún o db down)"
+    echo ""
+    echo "==> Último rollback de auto-update"
+    grep '"kind":"rolled_back"' "${SGG_HOME}/state/journal.ndjson" 2>/dev/null | tail -1 \
+      || echo "  (ninguno)"
     ;;
 
   backup-now)
