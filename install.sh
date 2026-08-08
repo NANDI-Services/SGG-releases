@@ -22,7 +22,7 @@
 set -euo pipefail
 
 # --- Config bumpeada por publish-release.yml ---
-SGG_VERSION="0.2.3"
+SGG_VERSION="0.2.4"
 SGG_HOME="${SGG_HOME:-/opt/sgg}"
 SGG_DRY_RUN="${SGG_DRY_RUN:-0}"
 SGG_ALLOW_LXC="${SGG_ALLOW_LXC:-0}"
@@ -223,7 +223,7 @@ step "6/9 Instalando /usr/local/bin/sgg y sgg-agent"
 curl -fsSL "${RELEASES_RAW}/sgg" -o /usr/local/bin/sgg
 chmod +x /usr/local/bin/sgg
 # Agente de auto-update (docs/plans/autoupdate-plan.md): systemd timer cada
-# 15 min. El agente sale en silencio si SGG_AGENT_TOKEN no está en el .env.
+# 5 min. El agente sale en silencio si SGG_AGENT_TOKEN no está en el .env.
 curl -fsSL "${RELEASES_RAW}/sgg-agent" -o /usr/local/bin/sgg-agent
 chmod +x /usr/local/bin/sgg-agent
 curl -fsSL "${RELEASES_RAW}/sgg-agent.service" -o /etc/systemd/system/sgg-agent.service

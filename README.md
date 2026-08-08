@@ -107,7 +107,7 @@ recrea. Con versión, primero se **auto-actualiza**: baja `sgg`,
 ## Actualización automática (desatendida)
 
 Desde v0.2.0 las instancias se actualizan solas: un agente (`sgg-agent`,
-systemd timer cada 15 min) consulta a la API, aplica los updates en la
+systemd timer cada 5 min) consulta a la API, aplica los updates en la
 ventana de mantenimiento (`SGG_UPDATE_WINDOW`, default `03:00-05:00`), hace
 backup incremental antes, y si el health check falla revierte con PITR al
 instante previo. Detalle completo: `docs/plans/autoupdate-plan.md` (repo

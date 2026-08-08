@@ -38,12 +38,14 @@ merge_env() {
   done < "$example"
 }
 
-# Baja sgg/compose/env.example del TAG objetivo, verifica checksums y se
-# reemplaza a sí mismo. Termina en `exec` para que el resto del update corra
-# con el script nuevo: bash lee el script mientras lo ejecuta y reemplazarlo
-# in-place a mitad de corrida es comportamiento indefinido.
+# Baja sgg/sgg-agent/units de systemd/compose/env.example del TAG objetivo,
+# verifica checksums y se reemplaza a sí mismo. Termina en `exec` para que el
+# resto del update corra con el script nuevo: bash lee el script mientras lo
+# ejecuta y reemplazarlo in-place a mitad de corrida es comportamiento
+# indefinido.
 # Asset faltante DEGRADA (releases pre-Fase-0 no publican SHA256SUMS y
-# `sgg update` debe seguir funcionando contra ellos). Checksum inválido
+# `sgg update` debe seguir funcionando contra ellos; toda release desde
+# v0.2.0 publica los 9 assets, units incluidos). Checksum inválido
 # ABORTA (posible corrupción o manipulación — nunca "sigo igual").
 self_update() {
   local to="$1" tmp f
@@ -51,7 +53,7 @@ self_update() {
   tmp=$(mktemp -d)
   # `env.example` sin punto: GitHub renombra los assets dotfile del release
   # (`.env.example` → `default.env.example`) y la descarga por nombre 404ea.
-  for f in sgg sgg-agent docker-compose.yaml env.example SHA256SUMS; do
+  for f in sgg sgg-agent sgg-agent.service sgg-agent.timer docker-compose.yaml env.example SHA256SUMS; do
     if ! curl -fsSL "${SGG_RELEASES_DL}/v${to}/${f}" -o "${tmp}/${f}"; then
       echo "sgg: v${to} no publica ${f} — sigo sin self-update." >&2
       rm -rf "$tmp"
@@ -69,6 +71,18 @@ self_update() {
   install -m 755 "${tmp}/sgg" /usr/local/bin/sgg
   # El agente también: un bug en sgg-agent no puede exigir SSH para arreglarse.
   install -m 755 "${tmp}/sgg-agent" /usr/local/bin/sgg-agent
+  # Units de systemd: sin esto, un cambio de OnCalendar (p.ej. 15 → 5 min)
+  # jamás llegaría a una instalación existente. daemon-reload solo NO re-arma
+  # el timer activo con la expresión nueva — hace falta el restart.
+  # `try-restart` y no `restart`: en una instalación sin migrar a auto-update
+  # el timer nunca se habilitó y no corresponde arrancarlo de prepo.
+  install -m 644 "${tmp}/sgg-agent.service" /etc/systemd/system/sgg-agent.service
+  install -m 644 "${tmp}/sgg-agent.timer" /etc/systemd/system/sgg-agent.timer
+  # Guard: el harness E2E corre `sgg` en containers sin systemd (§17.7).
+  if [[ -d /run/systemd/system ]]; then
+    systemctl daemon-reload
+    systemctl try-restart sgg-agent.timer || true
+  fi
   rm -rf "$tmp"
   SGG_SELF_UPDATED=1 exec /usr/local/bin/sgg update "$to"
 }

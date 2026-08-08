@@ -4,7 +4,7 @@
 #
 # NO decide nada: la política vive en la API, que es el lado actualizable
 # (docs/plans/autoupdate-plan.md §4). Este script pregunta, ejecuta y reporta.
-# Corre cada 15 min vía systemd timer (sgg-agent.timer). Logs: journalctl -u
+# Corre cada 5 min vía systemd timer (sgg-agent.timer). Logs: journalctl -u
 # sgg-agent. Verdad de último recurso: /opt/sgg/state/journal.ndjson —
 # append-only, vive en el host, fuera del alcance del PITR (§10.1).
 #
@@ -75,7 +75,7 @@ flock -n 9 || exit 0
 if ! DECISION=$(api_get /internal/update/decision); then
   journal agent_error "API sin respuesta en /internal/update/decision"
   # Webhook con rate-limit de 6 h: una API caída se detecta en cada ciclo de
-  # 15 min y sin el guard serían ~96 POSTs por día.
+  # 5 min y sin el guard serían ~288 POSTs por día.
   NOTIFY_MARK="${STATE_DIR}/last-agent-error-notify"
   if [[ ! -f "$NOTIFY_MARK" ]] ||
     (($(date +%s) - $(stat -c %Y "$NOTIFY_MARK" 2>/dev/null || echo 0) > 21600)); then

@@ -1,8 +1,8 @@
 [Unit]
-Description=SGG auto-update agent (cada 15 min)
+Description=SGG auto-update agent (cada 5 min)
 
 [Timer]
-OnCalendar=*:00/15
+OnCalendar=*:00/5
 # Recupera la corrida perdida si la VM estuvo apagada (§4.2 del plan).
 Persistent=true
 RandomizedDelaySec=60

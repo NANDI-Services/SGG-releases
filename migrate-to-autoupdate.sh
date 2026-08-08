@@ -59,5 +59,5 @@ systemctl daemon-reload
 systemctl enable --now sgg-agent.timer
 
 echo ""
-echo "Listo. El agente corre cada 15 min (journalctl -u sgg-agent)."
+echo "Listo. El agente corre cada 5 min (journalctl -u sgg-agent)."
 echo "Es la última vez que hizo falta SSH para actualizar el mecanismo de update."
