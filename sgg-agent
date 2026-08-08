@@ -120,13 +120,18 @@ journal attempt "update ${FROM} -> ${TO}"
 
 # --- 4. pull con la versión como VARIABLE DE SHELL (§8.1) -------------------
 # `pull` respeta el env de shell pero `up` relee del .env: verifica que las
-# imágenes existen en GHCR SIN comprometerse al tag nuevo. Si el release
-# salió sin imágenes, aborta habiendo tocado exactamente nada.
-if ! SGG_VERSION="$TO" docker compose pull; then
-  journal update_failed "pull: imágenes de v${TO} no disponibles"
+# imágenes existen en GHCR SIN comprometerse al tag nuevo. Si falla, aborta
+# habiendo tocado exactamente nada, y el journal lleva el error REAL de
+# docker (auth, red, tag inexistente), no una re-etiqueta.
+if ! PULL_OUT=$(SGG_VERSION="$TO" docker compose pull 2>&1); then
+  printf '%s\n' "$PULL_OUT"
+  # detail va crudo al JSON del journal: sin comillas, backslashes ni saltos
+  PULL_ERR=$(printf '%s' "$PULL_OUT" | tail -n 3 | tr '\n\r' '  ' | tr -d '"\\')
+  journal update_failed "pull v${TO}: ${PULL_ERR:-docker compose pull falló sin salida}"
   report "{\"outcome\":\"failed\",\"from\":\"${FROM}\",\"to\":\"${TO}\",\"failedStep\":\"pull\"}"
   exit 0
 fi
+printf '%s\n' "$PULL_OUT"
 
 # --- 5. timestamp del SERVER (§8.2) + backup incremental --------------------
 # El reloj del host puede driftear; el --target del PITR debe salir del mismo
