@@ -157,9 +157,16 @@ fi
 sed -i "s/^SGG_VERSION=.*/SGG_VERSION=\"${TO}\"/" .env
 
 # --- 8. health profundo (§9) ------------------------------------------------
+# `${WEB}/` responde 307 al gate del root para no autenticados y `curl -fsS` lo
+# cuenta como éxito, así que esa sonda sólo probaba que el proceso estuviera
+# arriba. `/login` sirve la pantalla de verdad: exigir 200 y que el formulario
+# esté en el HTML caza un bundle roto, que era invisible antes.
+web_login_ok() {
+  curl -fsS -m 15 "${WEB}/login" 2>/dev/null | grep -q 'type="password"'
+}
+
 deep_health_ok() {
-  curl -fsS -m 15 "${API}/health/deep" >/dev/null 2>&1 &&
-    curl -fsS -m 15 -o /dev/null "${WEB}/" 2>/dev/null
+  curl -fsS -m 15 "${API}/health/deep" >/dev/null 2>&1 && web_login_ok
 }
 
 wait_healthy() { # $1=segundos

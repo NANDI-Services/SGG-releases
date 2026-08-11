@@ -44,6 +44,31 @@ la consola, quedó en el log: `grep 'Web:' /opt/sgg/install.log`. Para averiguar
 Ubuntu y Debian vienen con UFW inactivo por default, así que normalmente no hace falta
 abrir nada. Si lo activaste: `sudo ufw allow 3000/tcp && sudo ufw allow 3001/tcp`.
 
+### Cuánto dura la sesión
+
+**24 horas de inactividad.** Quien usa el sistema todos los días no vuelve a ver la
+pantalla de login; una máquina que queda abierta y sin usar pide credenciales al día
+siguiente. Está pensado para terminales compartidas: es el tiempo que alguien podría
+volver a un equipo ajeno y seguir dentro de la historia clínica.
+
+El límite lo aplica el sistema, no el archivo de configuración, así que vale también en
+instalaciones que vienen de versiones anteriores. Si tu operación necesita sesiones más
+largas, se habilita explícitamente en `/opt/sgg/.env`:
+
+```bash
+SGG_ALLOW_LONG_SESSIONS="true"
+REFRESH_TOKEN_EXPIRES_IN_DAYS="7"   # el valor pasa a respetarse tal cual
+```
+
+y después `cd /opt/sgg && docker compose up -d api`.
+
+### La primera vez que entra un usuario nuevo
+
+Todo usuario recién creado —incluido el administrador que imprime el instalador— tiene
+que cambiar su contraseña antes de poder hacer cualquier otra cosa. La pantalla aparece
+sola al entrar y no se puede saltear: el bloqueo está en el servidor, no sólo en la
+interfaz. Si alguien reporta que "no le anda nada" apenas entra, es esto.
+
 ## Cómo generar el PAT (5 min)
 
 El PAT lo genera **NANDI Services** (no el operador de la residencia). El
