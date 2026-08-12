@@ -161,6 +161,17 @@ sed -i "s/^SGG_VERSION=.*/SGG_VERSION=\"${TO}\"/" .env
 # cuenta como éxito, así que esa sonda sólo probaba que el proceso estuviera
 # arriba. `/login` sirve la pantalla de verdad: exigir 200 y que el formulario
 # esté en el HTML caza un bundle roto, que era invisible antes.
+#
+# ESTA FUNCIÓN ESTÁ DUPLICADA A PROPÓSITO. El mismo chequeo vive en la API,
+# dentro de `/health/deep` (`probeWeb` en apps/api/src/modules/system/routes.ts),
+# que es el lado que SÍ se auto-actualiza: lo que se escribe acá sólo llega a
+# las VMs donde alguien corra `sgg update` a mano, y por eso la lógica del host
+# tiene que ser mínima (R2, §3 del plan de auto-update).
+#
+# REGLA DE SECUENCIA — esta función se borra en el MISMO release en que
+# `/health/deep` pase a devolver 503 por sus sondas, nunca antes. Si se borra
+# primero, una VM que corra `sgg update` se queda sin chequeo del web por los
+# dos lados: perdió el del host y el de la API todavía no es bloqueante.
 web_login_ok() {
   curl -fsS -m 15 "${WEB}/login" 2>/dev/null | grep -q 'type="password"'
 }
