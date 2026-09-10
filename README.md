@@ -144,6 +144,10 @@ privado).
   `/opt/sgg/state/journal.ndjson`.
 - **Una versión que falló queda vetada** y no se reintenta sola;
   `sudo sgg update --force <version>` la des-veta y aplica a mano.
+- **Knobs de ensayo** (`SGG_UPDATE_RELEASES_REPO` en `.env`, `RELEASES_RAW`
+  al correr `install.sh`): apuntan el discovery y el instalador a un repo
+  de prueba. Existen para el E2E del auto-update; en una instalación real
+  no se tocan.
 
 ### Migrar una instalación existente (una sola vez)
 

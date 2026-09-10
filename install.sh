@@ -12,6 +12,9 @@
 #   SGG_HOME=/srv/sgg bash -c "$(curl -fsSL ...)"     — otro directorio
 #   SGG_DRY_RUN=1 bash install.sh                     — no toca nada
 #   SGG_ALLOW_LXC=1 bash install.sh                   — permitir CT/LXC (avanzado)
+#   RELEASES_RAW=https://raw.githubusercontent.com/<owner>/<repo>/main bash install.sh
+#                                                     — otro origen de assets (sólo
+#                                                       ensayo E2E; nunca en campo)
 #
 # El script pide UNA sola cosa interactiva: el PAT classic de GitHub con
 # scope read:packages (para bajar imágenes del registry privado de la org
@@ -22,12 +25,13 @@
 set -euo pipefail
 
 # --- Config bumpeada por publish-release.yml ---
-SGG_VERSION="0.2.10"
+SGG_VERSION="0.2.11"
 SGG_HOME="${SGG_HOME:-/opt/sgg}"
 SGG_DRY_RUN="${SGG_DRY_RUN:-0}"
 SGG_ALLOW_LXC="${SGG_ALLOW_LXC:-0}"
 
-RELEASES_RAW="https://raw.githubusercontent.com/NANDI-Services/SGG-releases/main"
+# Overrideable sólo para el harness E2E (mismo patrón que migrate-to-autoupdate.sh).
+RELEASES_RAW="${RELEASES_RAW:-https://raw.githubusercontent.com/NANDI-Services/SGG-releases/main}"
 GHCR_ORG="nandi-services"
 
 LOG_FILE="${SGG_HOME}/install.log"

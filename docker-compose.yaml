@@ -106,6 +106,9 @@ services:
       SGG_UPDATE_DEADLINE_HOURS: ${SGG_UPDATE_DEADLINE_HOURS:-72}
       SGG_AGENT_TOKEN: ${SGG_AGENT_TOKEN:-}
       SGG_INSTANCE_NAME: ${SGG_INSTANCE_NAME:-}
+      # Repo de GitHub que el discovery consulta. Knob de ENSAYO (E2E de la
+      # Fase 6, docs/specs/e2e-autoupdate.md): en campo no se toca nunca.
+      SGG_UPDATE_RELEASES_REPO: ${SGG_UPDATE_RELEASES_REPO:-NANDI-Services/SGG-releases}
       # Cookies con flag Secure. Default false para pilot en LAN sin HTTPS.
       # Setear true cuando haya reverse-proxy TLS (Caddy, nginx, Cloudflare).
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
