@@ -102,6 +102,10 @@ services:
       # ninguna obligatoria: una instalación sin migrar a auto-update levanta
       # igual. SGG_AGENT_TOKEN vacío = endpoints internos del agente inertes.
       SGG_UPDATE_CHANNEL: ${SGG_UPDATE_CHANNEL:-patch}
+      # La ventana se evalúa en la zona horaria del CONTENEDOR, no de la VM:
+      # sin TZ, "03:00-05:00" son las 03:00 UTC (00:00 en Argentina). install.sh
+      # copia la zona de la VM al .env; en instalaciones previas se agrega a mano.
+      TZ: ${TZ:-UTC}
       SGG_UPDATE_WINDOW: ${SGG_UPDATE_WINDOW:-03:00-05:00}
       SGG_UPDATE_DEADLINE_HOURS: ${SGG_UPDATE_DEADLINE_HOURS:-72}
       SGG_AGENT_TOKEN: ${SGG_AGENT_TOKEN:-}

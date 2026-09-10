@@ -138,6 +138,11 @@ backup incremental antes, y si el health check falla revierte con PITR al
 instante previo. Detalle completo: `docs/plans/autoupdate-plan.md` (repo
 privado).
 
+- **Zona horaria** (`TZ` en `.env`): la ventana se interpreta en la zona del
+  contenedor `api`. `install.sh` copia la de la VM; una instalación anterior
+  a v0.2.12 corre en UTC hasta que el operador agregue
+  `TZ="America/Argentina/Buenos_Aires"` (o la que corresponda) y haga
+  `docker compose up -d api`.
 - **Canal** (`SGG_UPDATE_CHANNEL`): `patch` (default) | `minor` | `off`.
   `off` desactiva el auto-update; el aviso en la web queda informativo.
 - **Logs del agente**: `journalctl -u sgg-agent`. Historial local:

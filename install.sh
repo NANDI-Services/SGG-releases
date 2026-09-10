@@ -25,14 +25,13 @@
 set -euo pipefail
 
 # --- Config bumpeada por publish-release.yml ---
-SGG_VERSION="0.2.11"
+SGG_VERSION="${SGG_VERSION:-0.2.12}"
 SGG_HOME="${SGG_HOME:-/opt/sgg}"
 SGG_DRY_RUN="${SGG_DRY_RUN:-0}"
 SGG_ALLOW_LXC="${SGG_ALLOW_LXC:-0}"
 
 # Overrideable sólo para el harness E2E (mismo patrón que migrate-to-autoupdate.sh).
 RELEASES_RAW="${RELEASES_RAW:-https://raw.githubusercontent.com/NANDI-Services/SGG-releases/main}"
-GHCR_ORG="nandi-services"
 
 LOG_FILE="${SGG_HOME}/install.log"
 
@@ -208,6 +207,10 @@ else
   sed -i "s|^PGBACKREST_REPO_CIPHER_PASS=.*|PGBACKREST_REPO_CIPHER_PASS=\"${PGBACKREST_REPO_CIPHER_PASS_VAL}\"|" .env
   sed -i "s|^SEED_ADMIN_PASSWORD=.*|SEED_ADMIN_PASSWORD=\"${SEED_ADMIN_PASSWORD_VAL}\"|"                  .env
   sed -i "s|^SGG_AGENT_TOKEN=.*|SGG_AGENT_TOKEN=\"${SGG_AGENT_TOKEN_VAL}\"|"                              .env
+  # Zona horaria de la VM → contenedor api, para que SGG_UPDATE_WINDOW sea hora
+  # local de verdad (el E2E de la Fase 6 lo destapó: sin esto es UTC).
+  TZ_VAL=$(timedatectl show -p Timezone --value 2>/dev/null || cat /etc/timezone 2>/dev/null || true)
+  [[ -n "$TZ_VAL" ]] && sed -i "s|^TZ=.*|TZ=\"${TZ_VAL}\"|" .env
 
   chmod 600 .env
   log ".env generado con permisos 600."
