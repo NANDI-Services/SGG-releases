@@ -25,7 +25,7 @@
 set -euo pipefail
 
 # --- Config bumpeada por publish-release.yml ---
-SGG_VERSION="${SGG_VERSION:-0.6.0}"
+SGG_VERSION="${SGG_VERSION:-0.6.1}"
 SGG_HOME="${SGG_HOME:-/opt/sgg}"
 SGG_DRY_RUN="${SGG_DRY_RUN:-0}"
 SGG_ALLOW_LXC="${SGG_ALLOW_LXC:-0}"
