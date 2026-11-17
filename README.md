@@ -26,7 +26,14 @@ sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/NANDI-Services/SGG-
 ```
 
 El script pide el PAT una vez, genera todos los secrets, levanta la stack
-e imprime las credenciales del admin **una sola vez** al final. Guardalas.
+e imprime las credenciales del **Desarrollador** inicial **una sola vez** al
+final. Guardalas: es el usuario del equipo de SGG, no el de la residencia.
+
+Con ese usuario, entrá y creá al administrador de la residencia desde
+**Usuarios** (rol Administración). El rol Desarrollador tiene todos los
+permisos, es el único que crea roles nuevos y la residencia no lo ve: ni ese
+rol ni sus usuarios aparecen en Usuarios ni en Roles, y en la auditoría sus
+acciones figuran como «Soporte técnico».
 
 ## Acceso a la app
 
@@ -64,7 +71,7 @@ y después `cd /opt/sgg && docker compose up -d api`.
 
 ### La primera vez que entra un usuario nuevo
 
-Todo usuario recién creado —incluido el administrador que imprime el instalador— tiene
+Todo usuario recién creado —incluido el Desarrollador que imprime el instalador— tiene
 que cambiar su contraseña antes de poder hacer cualquier otra cosa. La pantalla aparece
 sola al entrar y no se puede saltear: el bloqueo está en el servidor, no sólo en la
 interfaz. Si alguien reporta que "no le anda nada" apenas entra, es esto.
@@ -106,16 +113,40 @@ Cuando termina la relación comercial con una residencia:
 
 ## Comandos diarios (`sgg`)
 
-| Comando                                     | Qué hace                                                                                                                |
-| ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `sgg update [--force] [version]`            | Self-update de `sgg`/compose + bump `SGG_VERSION` + pull + up. `--force` limpia el veto de una versión que falló antes. |
-| `sgg logs [servicio]`                       | Tail de logs. Sin arg → todos.                                                                                          |
-| `sgg doctor`                                | Health HTTP + profundo (`/health/deep`) + disco + `pgbackrest info` + último rollback.                                  |
-| `sgg backup-now`                            | Backup **incremental** manual (rápido).                                                                                 |
-| `sgg backup-full`                           | Backup **full** manual (el cron ya lo hace semanal).                                                                    |
-| `sgg restore-pitr "YYYY-MM-DD HH:MM:SS+TZ"` | Restaura a punto-en-el-tiempo. **Destructivo**. `--force` opcional.                                                     |
-| `sgg status`                                | `docker compose ps`.                                                                                                    |
-| `sgg version`                               | Versión pinneada en `.env`.                                                                                             |
+| Comando                                        | Qué hace                                                                                                                |
+| ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `sgg update [--force] [version]`               | Self-update de `sgg`/compose + bump `SGG_VERSION` + pull + up. `--force` limpia el veto de una versión que falló antes. |
+| `sgg logs [servicio]`                          | Tail de logs. Sin arg → todos.                                                                                          |
+| `sgg doctor`                                   | Health HTTP + profundo (`/health/deep`) + disco + `pgbackrest info` + último rollback.                                  |
+| `sgg backup-now`                               | Backup **incremental** manual (rápido).                                                                                 |
+| `sgg backup-full`                              | Backup **full** manual (el cron ya lo hace semanal).                                                                    |
+| `sgg restore-pitr "YYYY-MM-DD HH:MM:SS+TZ"`    | Restaura a punto-en-el-tiempo. **Destructivo**. `--force` opcional.                                                     |
+| `sgg status`                                   | `docker compose ps`.                                                                                                    |
+| `sgg version`                                  | Versión pinneada en `.env`.                                                                                             |
+| `sgg dev-user create --email <x> --name "<y>"` | Alta de un usuario **Desarrollador** (equipo de SGG). Imprime la contraseña temporal una vez. Ver abajo.                |
+
+### Alta de un Desarrollador en una instalación existente
+
+Las instalaciones anteriores al rol Desarrollador no tienen ninguno, y el
+seed no lo crea si la base ya tiene usuarios. El primero se da de alta desde
+la VM:
+
+```bash
+cd /opt/sgg
+sudo sgg dev-user create --email soporte@nandi.com.ar --name "Soporte SGG"
+```
+
+Si el `sgg` instalado todavía no conoce el subcomando (se reinstala sólo con un
+`sgg update` manual), la misma línea funciona directo contra el contenedor:
+
+```bash
+sudo docker compose exec api node --import tsx/esm src/scripts/create-dev-user.ts \
+  --email soporte@nandi.com.ar --name "Soporte SGG"
+```
+
+La contraseña temporal se muestra una sola vez y se pide cambiarla en el primer
+ingreso. Si el email ya existe, el comando falla sin tocar nada. Sirve también
+para recuperar el acceso si se pierde el último Desarrollador.
 
 ## Actualizar a una versión nueva
 

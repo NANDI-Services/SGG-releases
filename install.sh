@@ -25,7 +25,7 @@
 set -euo pipefail
 
 # --- Config bumpeada por publish-release.yml ---
-SGG_VERSION="${SGG_VERSION:-0.6.3}"
+SGG_VERSION="${SGG_VERSION:-0.7.0}"
 SGG_HOME="${SGG_HOME:-/opt/sgg}"
 SGG_DRY_RUN="${SGG_DRY_RUN:-0}"
 SGG_ALLOW_LXC="${SGG_ALLOW_LXC:-0}"
@@ -284,24 +284,27 @@ else
 fi
 log "Si usás UFW: sudo ufw allow 3000/tcp && sudo ufw allow 3001/tcp"
 
-# --- 8. Info de credenciales admin (única vez) ---
-step "8/9 Credenciales admin"
+# --- 8. Info de credenciales del Desarrollador (única vez) ---
+# El seed crea al primer usuario con el rol Desarrollador (equipo de SGG); la
+# variable conserva el nombre SEED_ADMIN_* porque el compose la referencia.
+step "8/9 Credenciales del Desarrollador"
 if [[ "$SGG_DRY_RUN" == "1" ]]; then
   log "DRY_RUN: no hay credenciales."
 elif [[ -n "${SEED_ADMIN_PASSWORD_VAL:-}" ]]; then
   ADMIN_EMAIL=$(grep '^SEED_ADMIN_EMAIL=' .env | cut -d= -f2- | tr -d '"')
   echo ""
   echo "===================================================================="
-  echo " ADMIN INICIAL — GUARDÁ ESTO AHORA, NO SE MUESTRA DE NUEVO"
+  echo " DESARROLLADOR INICIAL — GUARDÁ ESTO AHORA, NO SE MUESTRA DE NUEVO"
   echo "===================================================================="
   echo " Email:    $ADMIN_EMAIL"
   echo " Password: $SEED_ADMIN_PASSWORD_VAL"
   echo "===================================================================="
-  echo " Cambiala desde la UI después del primer login."
+  echo " Cambiala en el primer ingreso. Después creá al administrador de"
+  echo " la residencia desde Usuarios: este usuario es del equipo de SGG."
   echo "===================================================================="
   echo ""
 else
-  log ".env pre-existente — no regeneré password. Credenciales admin viven en .env."
+  log ".env pre-existente — no regeneré password. Credenciales iniciales viven en .env."
 fi
 
 # --- 9. Fin ---

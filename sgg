@@ -15,6 +15,8 @@
 #   sgg restore-pitr <timestamp>   — restaura a punto-en-el-tiempo (destructivo)
 #   sgg status                     — docker compose ps
 #   sgg version                    — SGG_VERSION actual del .env
+#   sgg dev-user create --email <x> --name "<y>"
+#                                  — alta de un usuario Desarrollador
 # ============================================================================
 
 set -euo pipefail
@@ -231,6 +233,19 @@ case "$CMD" in
 
   version)
     grep '^SGG_VERSION=' .env | cut -d= -f2- | tr -d '"'
+    ;;
+
+  dev-user)
+    # Atajo: la lógica vive en la imagen de la API (spec rol-desarrollador §6),
+    # porque este CLI sólo se reinstala con un `sgg update` manual. Sin este
+    # atajo, la misma línea funciona igual:
+    #   docker compose exec api node --import tsx/esm src/scripts/create-dev-user.ts …
+    if [[ "${1:-}" != "create" ]]; then
+      echo 'Uso: sgg dev-user create --email <email> --name "<nombre completo>"' >&2
+      exit 1
+    fi
+    shift
+    docker compose exec api node --import tsx/esm src/scripts/create-dev-user.ts "$@"
     ;;
 
   help|--help|-h|"")
