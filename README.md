@@ -51,6 +51,20 @@ la consola, quedó en el log: `grep 'Web:' /opt/sgg/install.log`. Para averiguar
 Ubuntu y Debian vienen con UFW inactivo por default, así que normalmente no hace falta
 abrir nada. Si lo activaste: `sudo ufw allow 3000/tcp && sudo ufw allow 3001/tcp`.
 
+### Checklist: la cobertura WiFi para la Ronda
+
+La pantalla **Ronda** se usa desde el celular al lado de la cama y no funciona
+sin conexión. Antes de dar la instalación por terminada, **recorré las
+habitaciones con un celular abriendo el SGG** (`http://<IP-DEL-SERVIDOR>:3000`,
+con un usuario de prueba) y anotá las zonas donde la página no carga. Si hay
+zonas sin señal, se resuelve con un punto de acceso, no desde el SGG.
+
+Si la ronda de la residencia dura más de 3 h o se adelanta más de 30 minutos, se
+ajustan `ROUND_SPAN_MINUTES` y `ROUND_LEAD_MINUTES` en `/opt/sgg/.env`
+(`ROUND_VITALS_WINDOW_HOURS` define cuántas horas sin signos vitales ponen a un
+residente en la lista). En una instalación anterior a esta versión, esas
+variables sólo llegan al contenedor tras un `sgg update` manual.
+
 ### Cuánto dura la sesión
 
 **24 horas de inactividad.** Quien usa el sistema todos los días no vuelve a ver la

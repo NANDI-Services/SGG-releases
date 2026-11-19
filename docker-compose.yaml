@@ -114,6 +114,12 @@ services:
       # Repo de GitHub que el discovery consulta. Knob de ENSAYO (E2E de la
       # Fase 6, docs/specs/e2e-autoupdate.md): en campo no se toca nunca.
       SGG_UPDATE_RELEASES_REPO: ${SGG_UPDATE_RELEASES_REPO:-NANDI-Services/SGG-releases}
+      # Ronda del celular (spec uso-desde-celular §4.1). Los defaults valen en
+      # toda instalación; ajustarlos exige un `sgg update` manual que traiga
+      # este compose (el de cada instalación queda fijo con su versión).
+      ROUND_LEAD_MINUTES: ${ROUND_LEAD_MINUTES:-30}
+      ROUND_SPAN_MINUTES: ${ROUND_SPAN_MINUTES:-180}
+      ROUND_VITALS_WINDOW_HOURS: ${ROUND_VITALS_WINDOW_HOURS:-8}
       # Cookies con flag Secure. Default false para pilot en LAN sin HTTPS.
       # Setear true cuando haya reverse-proxy TLS (Caddy, nginx, Cloudflare).
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
